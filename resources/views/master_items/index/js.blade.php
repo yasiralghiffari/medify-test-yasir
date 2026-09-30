@@ -11,7 +11,7 @@
     $(document).ready(function() {
         $('#table').DataTable({
             searching: false,
-            order: [[0, 'desc']],
+            order: [[1, 'desc']],
         });
         getData()
     });
@@ -40,21 +40,26 @@
                 var data = results.data
 
                 $.each(data, function(index, item) {
-                    array_temp = [];
-                    var harga_jual = item.harga_beli + item.harga_beli * item.laba / 100;
-                    harga_jual = Math.round(harga_jual)
+                    var array_temp = [];
+                    var harga_jual = item.harga_beli + (item.harga_beli * item.laba / 100);
+                    harga_jual = Math.round(harga_jual);
                     var kode = item.kode;
 
-                    var html = `<a href="{{url('master-items/view/')}}/` + kode + `" class="btn btn-primary">View</a>`
+                    var fotoHtml = item.foto 
+                        ? `<img src="${item.foto}" width="50" height="50" style="object-fit:cover; border-radius:4px;">` 
+                        : `<span class="badge bg-secondary">No Foto</span>`;
 
-                    $.each(item, function(obj_name, obj_value) {
-                        if (obj_name == 'laba') return false;
-                        array_temp.push(obj_value)
-                    })
-                    array_temp.push(harga_jual)
-                    array_temp.push(item.supplier)
-                    array_temp.push(html)
+                    var viewHtml = `<a href="{{url('master-items/view/')}}/` + kode + `" class="btn btn-primary btn-sm">View</a>`;
 
+                    array_temp.push(fotoHtml);
+                    array_temp.push(item.kode);
+                    array_temp.push(item.nama);
+                    array_temp.push(item.categories || '-');
+                    array_temp.push(item.jenis);
+                    array_temp.push(item.harga_beli);
+                    array_temp.push(harga_jual);
+                    array_temp.push(item.supplier);
+                    array_temp.push(viewHtml);
 
                     dataTableObj.row.add(array_temp).draw(true);
                 });
@@ -66,9 +71,8 @@
                     $.ajax(this);
                     return;
                 }
-                alert('Terjadi kesalahan server, tidak dapat mengambil data')
+                alert('Terjadi kesalahan server, tidak dapat mengambil data');
                 $('#loading-filter').hide();
-
                 return;
             }
         })

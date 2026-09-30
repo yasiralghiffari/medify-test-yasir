@@ -3,7 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\MasterItem;
+use App\Models\Category;
+use App\Exports\MasterItemsExport;
 use Illuminate\Http\Request;
+use Maatwebsite\Excel\Facades\Excel;
 
 class MasterItemsController extends Controller
 {
@@ -19,50 +22,88 @@ class MasterItemsController extends Controller
         $hargamin = $request->hargamin;
         $hargamax = $request->hargamax;
 
-        $data_search = MasterItem::query();
+        $data_search = MasterItem::with('categories');
 
-        if (!empty($kode)) $data_search = $data_search->where('kode', $kode);
-        if (!empty($nama)) $data_search = $data_search->where('nama', 'LIKE', '%' . $nama . '%');
-        if (!empty($hargamin)) $data_search = $data_search->where('harga_beli', '>=', $hargamin)->where('harga_beli', '<=', $hargamax);
+        if (!empty($kode)) {
+            $data_search->where('kode', 'LIKE', '%' . $kode . '%');
+        }
+        if (!empty($nama)) {
+            $data_search->where('nama', 'LIKE', '%' . $nama . '%');
+        }
+        
+        // FIX BUG: filter harga min dan harga max dipisah dan dipastikan valid
+        if ($hargamin !== null && $hargamin !== '') {
+            $data_search->where('harga_beli', '>=', $hargamin);
+        }
+        if ($hargamax !== null && $hargamax !== '') {
+            $data_search->where('harga_beli', '<=', $hargamax);
+        }
 
-        $data_search = $data_search->select('kode', 'nama', 'jenis', 'harga_beli', 'laba', 'supplier')->orderBy('id')->get();
+        $items = $data_search->orderBy('id', 'desc')->get();
 
+        $formatted_data = $items->map(function ($item) {
+            return [
+                'kode' => $item->kode,
+                'nama' => $item->nama,
+                'jenis' => $item->jenis,
+                'harga_beli' => $item->harga_beli,
+                'laba' => $item->laba,
+                'supplier' => $item->supplier,
+                'foto' => $item->foto ? asset('storage/' . $item->foto) : null,
+                'categories' => $item->categories->pluck('nama')->implode(', '),
+            ];
+        });
 
-        return json_encode([
+        return response()->json([
             'status' => 200,
-            'data' => $data_search
+            'data' => $formatted_data
         ]);
     }
 
     public function formView($method, $id = 0)
     {
         if ($method == 'new') {
-            $item = [];
+            $item = new MasterItem();
+            $selectedCategories = [];
         } else {
-            $item = MasterItem::find($id);
+            $item = MasterItem::with('categories')->findOrFail($id);
+            $selectedCategories = $item->categories->pluck('id')->toArray();
         }
+
+        $categories = Category::orderBy('nama')->get();
+
         $data['item'] = $item;
         $data['method'] = $method;
+        $data['categories'] = $categories;
+        $data['selectedCategories'] = $selectedCategories;
+
         return view('master_items.form.index', $data);
     }
 
     public function singleView($kode)
     {
-        $data['data'] = MasterItem::where('kode', $kode)->first();
+        $data['data'] = MasterItem::with('categories')->where('kode', $kode)->firstOrFail();
         return view('master_items.single.index', $data);
     }
 
     public function formSubmit(Request $request, $method, $id = 0)
     {
         if ($method == 'new') {
-            $data_item = new MasterItem;
-            $kode = MasterItem::count('id');
-            $kode = $kode + 1;
-            $kode = str_pad($kode, 5, '0', STR_PAD_LEFT);
-            sleep(3);
+            $data_item = new MasterItem();
+            $lastItem = MasterItem::orderBy('id', 'desc')->first();
+            $nextId = $lastItem ? $lastItem->id + 1 : 1;
+            $kode = str_pad($nextId, 5, '0', STR_PAD_LEFT);
         } else {
-            $data_item = MasterItem::find($id);
+            $data_item = MasterItem::findOrFail($id);
             $kode = $data_item->kode;
+        }
+
+        if ($request->hasFile('foto')) {
+            $request->validate([
+                'foto' => 'image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+            ]);
+            $fotoPath = $request->file('foto')->store('items', 'public');
+            $data_item->foto = $fotoPath;
         }
 
         $data_item->nama = $request->nama;
@@ -73,13 +114,24 @@ class MasterItemsController extends Controller
         $data_item->jenis = $request->jenis;
         $data_item->save();
 
+        if ($request->has('categories')) {
+            $data_item->categories()->sync($request->categories);
+        } else {
+            $data_item->categories()->detach();
+        }
+
         return redirect('master-items');
     }
 
     public function delete($id)
     {
-        MasterItem::find($id)->delete();
+        MasterItem::findOrFail($id)->delete();
         return redirect('master-items');
+    }
+
+    public function exportExcel()
+    {
+        return Excel::download(new MasterItemsExport(), 'master-items.xlsx');
     }
 
     public function updateRandomData()
@@ -97,6 +149,7 @@ class MasterItemsController extends Controller
             $item->jenis = $this->getRandomJenis();
             $item->save();
         }
+        return redirect('master-items');
     }
 
     private function getRandomSupplier()
